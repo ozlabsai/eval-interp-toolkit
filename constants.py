@@ -28,8 +28,6 @@ def get_categories():
     return categories, agent_categories, eval_categories
 
 
-ALL_CATEGORIES, AGENT_CATEGORIES, EVAL_CATEGORIES = get_categories()
-REAL_CATEGORIES = [c for c in ALL_CATEGORIES if c not in EVAL_CATEGORIES]
 CAPABILITY_EVAL_CATEGORIES = [
     "cybench",
     "swe_gym",
@@ -43,9 +41,29 @@ CAPABILITY_EVAL_CATEGORIES = [
     "smol_gaia_search",
     "wmdp",
 ]
-ALIGNMENT_EVAL_CATEGORIES = [
-    c for c in EVAL_CATEGORIES if c not in CAPABILITY_EVAL_CATEGORIES
-]
+
+_categories_cache: dict | None = None
+
+
+def _ensure_categories() -> dict:
+    global _categories_cache
+    if _categories_cache is None:
+        all_cats, agent_cats, eval_cats = get_categories()
+        _categories_cache = {
+            "ALL_CATEGORIES": all_cats,
+            "AGENT_CATEGORIES": agent_cats,
+            "EVAL_CATEGORIES": eval_cats,
+            "REAL_CATEGORIES": [c for c in all_cats if c not in eval_cats],
+            "ALIGNMENT_EVAL_CATEGORIES": [c for c in eval_cats if c not in CAPABILITY_EVAL_CATEGORIES],
+        }
+    return _categories_cache
+
+
+def __getattr__(name: str):
+    lazy = {"ALL_CATEGORIES", "AGENT_CATEGORIES", "EVAL_CATEGORIES", "REAL_CATEGORIES", "ALIGNMENT_EVAL_CATEGORIES"}
+    if name in lazy:
+        return _ensure_categories()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def find_most_recent_file(path: str) -> str | None:

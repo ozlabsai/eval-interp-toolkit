@@ -6,6 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Research project reproducing results from "Large Language Models Often Know When They Are Being Evaluated." Tests whether LLMs can detect when they're being evaluated (vs. real-world deployment) by asking them probe questions about conversation contexts.
 
+## Data Setup
+
+The dataset (`eval_awareness_val.json`) is gated and encrypted on HuggingFace at `jjpn2/eval_awareness`.
+
+One-time prerequisites:
+```bash
+sudo apt install git-lfs   # macOS: brew install git-lfs
+git lfs install
+huggingface-cli login      # paste your HF access token
+```
+
+Then download and decrypt:
+```bash
+uv run download_data.py
+```
+
+This clones the dataset repo to `../eval_awareness_data`, runs the upstream `scripts/decrypt.sh`, and copies the result to `eval_awareness_val.json` in the project root. Requires access approval at https://huggingface.co/datasets/jjpn2/eval_awareness.
+
 ## Running the Project
 
 Use UV for Python execution:

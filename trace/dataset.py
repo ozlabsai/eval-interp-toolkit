@@ -12,6 +12,7 @@ This reuses the same logic as constants.AGENT_CATEGORIES but scoped to NON_EVAL 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,11 @@ class TraceRecord:
 
 def load_trace_dataset(filename: str, limit: int | None = None) -> list[TraceRecord]:
     """Return labeled TraceRecords from the given JSON file."""
+    if not os.path.exists(filename):
+        raise FileNotFoundError(
+            f"Dataset not found: {filename}\n"
+            "Run: uv run download_data.py"
+        )
     with open(filename) as f:
         data = json.load(f)
 
