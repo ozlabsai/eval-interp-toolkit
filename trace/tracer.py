@@ -66,7 +66,7 @@ def load_model(model_id: str = DEFAULT_MODEL_ID, device: str = "cuda") -> tuple[
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map=device,
     )
     # Set inference mode (equivalent to model.eval() without triggering pattern-match hooks)

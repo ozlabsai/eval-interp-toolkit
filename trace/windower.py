@@ -10,10 +10,47 @@ tokenizer, so it can be called without loading Mistral weights.
 """
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 from typing import Any
 import torch
 import torch.nn.functional as F
+
+_ALPHANUMERIC = re.compile(r'^[a-zA-Z0-9]{9}$')
+
+
+def _normalize_tool_id(tool_id: str) -> str:
+    """
+    Mistral's chat template requires tool call IDs to be exactly 9 alphanumeric chars.
+    Transcripts collected from other models (Claude, GPT-4) use UUIDs or arbitrary strings.
+    We hash the original ID to a deterministic 9-char alphanumeric string so that
+    assistant tool_calls and tool tool_call_id references stay consistent.
+    """
+    if _ALPHANUMERIC.match(tool_id):
+        return tool_id
+    return hashlib.sha256(tool_id.encode()).hexdigest()[:9]
+
+
+def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rewrite tool call IDs in-place (on copies) to satisfy Mistral's template constraints."""
+    result = []
+    for msg in messages:
+        msg = dict(msg)
+        # assistant messages: tool_calls list
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            new_calls = []
+            for call in msg["tool_calls"]:
+                call = dict(call)
+                if "id" in call:
+                    call["id"] = _normalize_tool_id(call["id"])
+                new_calls.append(call)
+            msg["tool_calls"] = new_calls
+        # tool result messages: tool_call_id field
+        if msg.get("role") == "tool" and "tool_call_id" in msg:
+            msg["tool_call_id"] = _normalize_tool_id(msg["tool_call_id"])
+        result.append(msg)
+    return result
 
 WINDOW_SIZE = 512
 STRIDE = WINDOW_SIZE // 2  # 256 tokens
@@ -37,7 +74,9 @@ def messages_to_windows(
 
     Returns at least one window even if the transcript is shorter than WINDOW_SIZE.
     """
-    # apply_chat_template handles role formatting and special tokens
+    # Normalize tool call IDs before templating — transcripts from Claude/GPT use
+    # UUIDs; Mistral's template requires exactly 9 alphanumeric chars.
+    messages = _sanitize_messages(messages)
     token_ids: list[int] = tokenizer.apply_chat_template(
         messages,
         tokenize=True,
