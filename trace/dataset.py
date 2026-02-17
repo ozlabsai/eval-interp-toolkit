@@ -31,7 +31,8 @@ def load_trace_dataset(filename: str, limit: int | None = None) -> list[TraceRec
     if not os.path.exists(filename):
         raise FileNotFoundError(
             f"Dataset not found: {filename}\n"
-            "Run: uv run download_data.py"
+            "Clone and decrypt the dataset: uv run download_data.py\n"
+            "Expected path after decryption: eval_awareness/dataset.json"
         )
     with open(filename) as f:
         data = json.load(f)

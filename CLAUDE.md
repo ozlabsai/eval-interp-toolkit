@@ -22,7 +22,12 @@ Then download and decrypt:
 uv run download_data.py
 ```
 
-This clones the dataset repo to `../eval_awareness_data`, runs the upstream `scripts/decrypt.sh`, and copies the result to `eval_awareness_val.json` in the project root. Requires access approval at https://huggingface.co/datasets/jjpn2/eval_awareness.
+This clones the HF repo, runs `scripts/decrypt.sh`, and the decrypted file lands at `eval_awareness/dataset.json`. Requires access approval at https://huggingface.co/datasets/jjpn2/eval_awareness.
+
+**Note:** `torch` must be installed with the CUDA wheel on GPU machines — `uv pip install -r requirements.txt` installs the CPU build. On CUDA 12.x:
+```bash
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
 
 ## Running the Project
 

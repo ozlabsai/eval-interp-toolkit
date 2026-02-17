@@ -1,7 +1,7 @@
 import json
 import os
 
-MAIN_DATA_FILE = "eval_awareness_val.json"
+MAIN_DATA_FILE = "eval_awareness/dataset.json"
 
 def get_categories():
     with open(MAIN_DATA_FILE) as f:
