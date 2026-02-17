@@ -4,7 +4,7 @@ import subprocess
 
 from constants import MAIN_DATA_FILE, find_most_recent_file
 
-STAGES = ["eval_mcq", "purpose_mcq", "purpose_open", "eval_mcq_cot", "purpose_open_cot", "plot_roc", "plot_calib", "plot_purpose", "plot_cot", "print_table"]
+STAGES = ["eval_mcq", "purpose_mcq", "purpose_open", "eval_mcq_cot", "purpose_open_cot", "plot_roc", "plot_calib", "plot_purpose", "plot_cot", "print_table", "trace_local"]
 
 MODELS = [
     ("openai", "gpt-4.1-mini-2025-04-14", None, None),
@@ -17,6 +17,7 @@ MODELS = [
     ("anthropic", "claude-3-7-sonnet-20250219", "16384", None),
     ("anthropic", "claude-3-5-sonnet-20241022", None, None),
 ]
+
 
 def find_model(model_ix: int, experiment_dir: str) -> tuple[str, str, list[str]]:
     provider, model, reasoning_tokens, reasoning_effort = MODELS[model_ix]
@@ -31,19 +32,20 @@ def find_model(model_ix: int, experiment_dir: str) -> tuple[str, str, list[str]]
         thinking_param = []
     return f"{provider}/{model}", f"logs/{experiment_dir}/{model_name}", thinking_param
 
+
 def eval_or_purpose_mcq(model_ixs: list[int], purpose: bool, openended: bool, limit: int, experiment_dir: str, epochs: int):
     for model_ix in model_ixs:
         full_model, output_log_dir, thinking_param = find_model(model_ix, experiment_dir)
         if purpose:
             if openended:
-                pq_file="pq_ablation/purpose_open.yaml"
+                pq_file = "pq_ablation/purpose_open.yaml"
             else:
-                pq_file="pq_ablation/purpose_mcq.yaml"
-            purpose_flag=["-Tis_purpose=true"]
+                pq_file = "pq_ablation/purpose_mcq.yaml"
+            purpose_flag = ["-Tis_purpose=true"]
         else:
             assert not openended, "open-ended evaluation is only for purpose"
-            pq_file="pq_ablation/eval_mcq.yaml"
-            purpose_flag=[]
+            pq_file = "pq_ablation/eval_mcq.yaml"
+            purpose_flag = []
 
         command = [
             "inspect",
@@ -69,6 +71,7 @@ def eval_or_purpose_mcq(model_ixs: list[int], purpose: bool, openended: bool, li
         ]
         subprocess.run(command, check=True)
 
+
 def eval_mcq_cot(model_ixs: list[int], input_experiment_dir: str, output_experiment_dir: str, scorer: str):
     for model_ix in model_ixs:
         _, input_log_dir, _ = find_model(model_ix, input_experiment_dir)
@@ -76,7 +79,7 @@ def eval_mcq_cot(model_ixs: list[int], input_experiment_dir: str, output_experim
         unique_file = find_most_recent_file(input_log_dir)
         if unique_file is None:
             raise ValueError(f"No unique .eval file found in {input_log_dir}")
-        
+
         if scorer == "reasoning_classifier":
             pq_args = ["-Tpqs=direct_a,h_purpose_analysis_a"]
         else:
@@ -104,17 +107,55 @@ def eval_mcq_cot(model_ixs: list[int], input_experiment_dir: str, output_experim
 def plot_roc(experiment_dir: str):
     subprocess.run(["python", "-m", "analysis.roc", experiment_dir])
 
+
 def plot_calib(experiment_dir: str):
     subprocess.run(["python", "-m", "analysis.calib", experiment_dir])
+
 
 def plot_purpose(experiment_dir: str, experiment_dir_open: str):
     subprocess.run(["python", "-m", "analysis.purpose", experiment_dir, experiment_dir_open])
 
+
 def plot_cot(experiment_dir: str):
     subprocess.run(["python", "-m", "analysis.cot", experiment_dir])
 
+
 def print_table(experiment_dir: str):
     subprocess.run(["python", "-m", "analysis.score_table", experiment_dir])
+
+
+def run_trace_local(limit: int, mini_suffix: str, model_id: str) -> None:
+    """
+    Run a local HuggingFace model telemetry pass over eval_awareness_val.json.
+    Outputs go to logs/trace_{model_slug}{mini_suffix}/ and contain:
+      records.parquet, activations/*.pt, manifest.json
+
+    Works with any HF causal LM using the standard decoder architecture
+    (model.model.layers[n]), e.g. Mistral, LLaMA, Gemma, Qwen.
+    """
+    from trace.dataset import load_trace_dataset
+    from trace.windower import messages_to_windows
+    from trace.tracer import load_model, unload_model, trace_sample
+    from trace.writer import write_outputs
+
+    device = "cuda"
+    # Derive a filesystem-safe slug from the model ID (e.g. "mistralai/Mistral-7B-..." -> "Mistral-7B-...")
+    model_slug = model_id.split("/")[-1]
+    output_dir = f"logs/trace_{model_slug}{mini_suffix}"
+    data_limit = limit if limit < 1_000_000 else None
+
+    records = load_trace_dataset(MAIN_DATA_FILE, limit=data_limit)
+    tokenizer, model = load_model(model_id=model_id, device=device)
+
+    traces = []
+    for rec in records:
+        windows = messages_to_windows(rec.messages, tokenizer)
+        trace = trace_sample(rec.sample_id, windows, model, device=device)
+        traces.append(trace)
+
+    unload_model(model)
+    write_outputs(traces, records, output_dir, model_id=model_id, limit=data_limit, device=device)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Run the dataset pipeline.")
@@ -128,6 +169,12 @@ def main():
         help="Stage to run"
     )
     parser.add_argument("--model", type=int, help="Model config to run")
+    parser.add_argument(
+        "--trace-model",
+        type=str,
+        default="mistralai/Mistral-7B-Instruct-v0.3",
+        help="HuggingFace model ID for the trace_local stage (any standard decoder LM)",
+    )
     args = parser.parse_args()
 
     assert args.mini or args.full, "You must specify either --mini or --full"
@@ -173,8 +220,11 @@ def main():
                 plot_cot(f"eval_mcq_cot{mini_suffix}")
             case "print_table":
                 print_table(f"eval_mcq{mini_suffix}")
+            case "trace_local":
+                run_trace_local(limit=limit, mini_suffix=mini_suffix, model_id=args.trace_model)
             case _:
                 raise ValueError(f"Unknown stage: {stage}")
+
 
 if __name__ == "__main__":
     main()

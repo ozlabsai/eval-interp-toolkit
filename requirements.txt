@@ -9,3 +9,8 @@ anthropic
 tiktoken
 umap-learn
 seaborn
+torch
+transformers
+accelerate
+pyarrow
+pandas
