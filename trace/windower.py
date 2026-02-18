@@ -31,7 +31,15 @@ def _messages_to_text(messages: list[dict[str, Any]]) -> str:
     parts = []
     for msg in messages:
         role = msg.get("role", "unknown")
-        content = msg.get("content") or ""
+        raw_content = msg.get("content") or ""
+        # content may be a string or a list of content blocks (e.g. tool results)
+        if isinstance(raw_content, list):
+            content = " ".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in raw_content
+            )
+        else:
+            content = str(raw_content)
         # Append tool_calls as JSON if present (agentic transcripts)
         tool_calls = msg.get("tool_calls")
         if tool_calls:
