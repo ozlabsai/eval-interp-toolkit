@@ -1,6 +1,7 @@
 import argparse
 import os
 import subprocess
+import sys
 
 from constants import MAIN_DATA_FILE, find_most_recent_file
 
@@ -105,23 +106,23 @@ def eval_mcq_cot(model_ixs: list[int], input_experiment_dir: str, output_experim
 
 
 def plot_roc(experiment_dir: str):
-    subprocess.run(["python", "-m", "analysis.roc", experiment_dir])
+    subprocess.run([sys.executable, "-m", "analysis.roc", experiment_dir])
 
 
 def plot_calib(experiment_dir: str):
-    subprocess.run(["python", "-m", "analysis.calib", experiment_dir])
+    subprocess.run([sys.executable, "-m", "analysis.calib", experiment_dir])
 
 
 def plot_purpose(experiment_dir: str, experiment_dir_open: str):
-    subprocess.run(["python", "-m", "analysis.purpose", experiment_dir, experiment_dir_open])
+    subprocess.run([sys.executable, "-m", "analysis.purpose", experiment_dir, experiment_dir_open])
 
 
 def plot_cot(experiment_dir: str):
-    subprocess.run(["python", "-m", "analysis.cot", experiment_dir])
+    subprocess.run([sys.executable, "-m", "analysis.cot", experiment_dir])
 
 
 def print_table(experiment_dir: str):
-    subprocess.run(["python", "-m", "analysis.score_table", experiment_dir])
+    subprocess.run([sys.executable, "-m", "analysis.score_table", experiment_dir])
 
 
 def run_trace_local(limit: int, mini_suffix: str, model_id: str) -> None:
@@ -231,11 +232,11 @@ def main():
                 run_trace_local(limit=limit, mini_suffix=mini_suffix, model_id=args.trace_model)
             case "probe_cheap":
                 model_slug = args.trace_model.split("/")[-1]
-                subprocess.run(["python", "-m", "analysis.probe_cheap",
+                subprocess.run([sys.executable, "-m", "analysis.probe_cheap",
                                 f"logs/trace_{model_slug}{mini_suffix}"], check=True)
             case "probe_acts":
                 model_slug = args.trace_model.split("/")[-1]
-                subprocess.run(["python", "-m", "analysis.probe_acts",
+                subprocess.run([sys.executable, "-m", "analysis.probe_acts",
                                 f"logs/trace_{model_slug}{mini_suffix}"], check=True)
             case _:
                 raise ValueError(f"Unknown stage: {stage}")

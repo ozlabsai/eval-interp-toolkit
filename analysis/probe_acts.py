@@ -106,20 +106,13 @@ def run(trace_dir: str) -> None:
         # Concatenated probe across all available layers
         if len(per_layer_arrays) > 1:
             # Use only samples present in ALL layers
-            common_all = set(subset["sample_id"])
-            for layer_idx in per_layer_arrays:
-                common_all &= set(layer_acts[layer_idx].keys())
-            common_all = sorted(common_all)
-
+            common_all = sorted(
+                set(subset["sample_id"]).intersection(
+                    *[set(layer_acts[l].keys()) for l in per_layer_arrays]
+                )
+            )
             if len(common_all) >= 10:
-                X_cat = np.concatenate(
-                    [layer_acts[l][sid] for l in sorted(per_layer_arrays) for sid in common_all],
-                    axis=0,
-                ).reshape(len(sorted(per_layer_arrays)), len(common_all), -1)
-                # shape: [n_layers, n_samples, hidden] -> [n_samples, n_layers * hidden]
-                X_cat = np.concatenate([layer_acts[l][sid].reshape(1, -1)
-                                        for sid in common_all
-                                        for l in sorted(per_layer_arrays)], axis=0)
+                # [n_samples, n_layers * hidden_dim]
                 X_cat = np.stack([
                     np.concatenate([layer_acts[l][sid] for l in sorted(per_layer_arrays)])
                     for sid in common_all
