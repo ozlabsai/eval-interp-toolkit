@@ -1,0 +1,137 @@
+"""
+Linear probes on layer activations from activations/*.pt.
+
+For each layer in {12, 18, 24, 30}:
+  - Fits a logistic regression on the mean-pooled hidden state [hidden_dim]
+  - Reports cross-validated AUC for EVAL vs REAL and EVAL vs HARD_NEG
+
+Also fits a concatenated probe across all 4 layers for maximum accuracy.
+
+Usage:
+  python -m analysis.probe_acts logs/trace_Mistral-7B-Instruct-v0.3_mini
+  python -m analysis.probe_acts logs/trace_Mistral-7B-Instruct-v0.3
+"""
+import os
+import sys
+import numpy as np
+import pandas as pd
+import torch
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+
+from trace.tracer import HOOK_LAYERS
+
+COMPARISONS = [
+    ("EVAL vs REAL",     ("EVAL", "REAL")),
+    ("EVAL vs HARD_NEG", ("EVAL", "HARD_NEG")),
+]
+
+
+def probe(X: np.ndarray, y: np.ndarray, cv: StratifiedKFold) -> float:
+    pipe = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000, C=0.1),  # regularize — high-dim features
+    )
+    scores = cross_val_score(pipe, X, y, cv=cv, scoring="roc_auc")
+    return float(scores.mean())
+
+
+def load_activations(trace_dir: str, sample_ids: list[str]) -> dict[int, dict[str, np.ndarray]]:
+    """
+    Returns {layer_idx: {sample_id: activation_vector}}.
+    Samples with no .pt file are skipped.
+    """
+    acts_dir = os.path.join(trace_dir, "activations")
+    result: dict[int, dict[str, np.ndarray]] = {l: {} for l in HOOK_LAYERS}
+
+    for sample_id in sample_ids:
+        pt_path = os.path.join(acts_dir, f"{sample_id}.pt")
+        if not os.path.exists(pt_path):
+            continue
+        layer_acts: dict[int, torch.Tensor] = torch.load(pt_path, map_location="cpu", weights_only=True)
+        for layer_idx, tensor in layer_acts.items():
+            result[layer_idx][sample_id] = tensor.float().numpy()
+
+    return result
+
+
+def run(trace_dir: str) -> None:
+    parquet_path = os.path.join(trace_dir, "records.parquet")
+    df = pd.read_parquet(parquet_path)
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    # Load all activations upfront
+    all_sample_ids = df["sample_id"].tolist()
+    print(f"Loading activations for {len(all_sample_ids)} samples ...")
+    layer_acts = load_activations(trace_dir, all_sample_ids)
+
+    n_loaded = len(next(iter(layer_acts.values())))
+    print(f"Loaded activations: {n_loaded} samples across layers {HOOK_LAYERS}")
+
+    for comparison_name, (pos_label, neg_label) in COMPARISONS:
+        subset = df[df["label"].isin([pos_label, neg_label])].copy()
+        if len(subset) < 10:
+            print(f"\n{comparison_name}: too few samples ({len(subset)}), skipping")
+            continue
+
+        y_map = {sid: int(lbl == pos_label)
+                 for sid, lbl in zip(subset["sample_id"], subset["label"])}
+
+        print(f"\n{'─' * 50}")
+        print(f"{comparison_name}  (n={len(subset)})")
+        print(f"{'─' * 50}")
+        print(f"{'Layer':<20} {'AUC':>6}  {'n_samples':>10}")
+        print(f"{'─' * 20} {'─' * 6}  {'─' * 10}")
+
+        per_layer_arrays: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+
+        for layer_idx in HOOK_LAYERS:
+            acts = layer_acts[layer_idx]
+            # Intersect: samples that have both a label and an activation
+            common_ids = [sid for sid in subset["sample_id"] if sid in acts]
+            if len(common_ids) < 10:
+                print(f"  layer {layer_idx:<14} {'n/a':>6}  {len(common_ids):>10}")
+                continue
+
+            X = np.stack([acts[sid] for sid in common_ids])
+            y = np.array([y_map[sid] for sid in common_ids])
+            per_layer_arrays[layer_idx] = (X, y)
+
+            auc = probe(X, y, cv)
+            print(f"  layer {layer_idx:<14} {auc:.3f}  {len(common_ids):>10}")
+
+        # Concatenated probe across all available layers
+        if len(per_layer_arrays) > 1:
+            # Use only samples present in ALL layers
+            common_all = set(subset["sample_id"])
+            for layer_idx in per_layer_arrays:
+                common_all &= set(layer_acts[layer_idx].keys())
+            common_all = sorted(common_all)
+
+            if len(common_all) >= 10:
+                X_cat = np.concatenate(
+                    [layer_acts[l][sid] for l in sorted(per_layer_arrays) for sid in common_all],
+                    axis=0,
+                ).reshape(len(sorted(per_layer_arrays)), len(common_all), -1)
+                # shape: [n_layers, n_samples, hidden] -> [n_samples, n_layers * hidden]
+                X_cat = np.concatenate([layer_acts[l][sid].reshape(1, -1)
+                                        for sid in common_all
+                                        for l in sorted(per_layer_arrays)], axis=0)
+                X_cat = np.stack([
+                    np.concatenate([layer_acts[l][sid] for l in sorted(per_layer_arrays)])
+                    for sid in common_all
+                ])
+                y_cat = np.array([y_map[sid] for sid in common_all])
+                auc_cat = probe(X_cat, y_cat, cv)
+                print(f"{'─' * 20} {'─' * 6}  {'─' * 10}")
+                print(f"  {'CONCATENATED':<18} {auc_cat:.3f}  {len(common_all):>10}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python -m analysis.probe_acts <trace_dir>")
+        sys.exit(1)
+    run(sys.argv[1])
