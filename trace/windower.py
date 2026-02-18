@@ -10,47 +10,34 @@ tokenizer, so it can be called without loading Mistral weights.
 """
 from __future__ import annotations
 
-import hashlib
-import re
+import json
 from dataclasses import dataclass
 from typing import Any
 import torch
 import torch.nn.functional as F
 
-_ALPHANUMERIC = re.compile(r'^[a-zA-Z0-9]{9}$')
 
-
-def _normalize_tool_id(tool_id: str) -> str:
+def _messages_to_text(messages: list[dict[str, Any]]) -> str:
     """
-    Mistral's chat template requires tool call IDs to be exactly 9 alphanumeric chars.
-    Transcripts collected from other models (Claude, GPT-4) use UUIDs or arbitrary strings.
-    We hash the original ID to a deterministic 9-char alphanumeric string so that
-    assistant tool_calls and tool tool_call_id references stay consistent.
+    Serialize a message list to plain text for tokenization.
+
+    We bypass the model's chat template entirely because transcripts collected
+    from Claude/GPT contain roles (tool, mid-conversation system) and tool call
+    ID formats that Mistral's strict Jinja template rejects. For activation/logprob
+    extraction we only need a consistent token sequence, not valid prompt formatting.
+
+    Format: "<|role|>\n{content}\n" per message, with tool_calls JSON-serialized.
     """
-    if _ALPHANUMERIC.match(tool_id):
-        return tool_id
-    return hashlib.sha256(tool_id.encode()).hexdigest()[:9]
-
-
-def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Rewrite tool call IDs in-place (on copies) to satisfy Mistral's template constraints."""
-    result = []
+    parts = []
     for msg in messages:
-        msg = dict(msg)
-        # assistant messages: tool_calls list
-        if msg.get("role") == "assistant" and msg.get("tool_calls"):
-            new_calls = []
-            for call in msg["tool_calls"]:
-                call = dict(call)
-                if "id" in call:
-                    call["id"] = _normalize_tool_id(call["id"])
-                new_calls.append(call)
-            msg["tool_calls"] = new_calls
-        # tool result messages: tool_call_id field
-        if msg.get("role") == "tool" and "tool_call_id" in msg:
-            msg["tool_call_id"] = _normalize_tool_id(msg["tool_call_id"])
-        result.append(msg)
-    return result
+        role = msg.get("role", "unknown")
+        content = msg.get("content") or ""
+        # Append tool_calls as JSON if present (agentic transcripts)
+        tool_calls = msg.get("tool_calls")
+        if tool_calls:
+            content = (content + "\n" + json.dumps(tool_calls)).strip()
+        parts.append(f"<|{role}|>\n{content}")
+    return "\n".join(parts)
 
 WINDOW_SIZE = 512
 STRIDE = WINDOW_SIZE // 2  # 256 tokens
@@ -76,16 +63,12 @@ def messages_to_windows(
     """
     # Normalize tool call IDs before templating — transcripts from Claude/GPT use
     # UUIDs; Mistral's template requires exactly 9 alphanumeric chars.
-    messages = _sanitize_messages(messages)
-    # Render to string first, then tokenize separately.
-    # apply_chat_template with tokenize=True can return a tokenizers.Encoding object
-    # from the fast tokenizer backend rather than a plain list[int], which breaks
-    # torch.tensor(). Splitting into two steps always yields a plain list.
-    text: str = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
-    )
+    # Serialize messages to plain text without using the model's chat template.
+    # Mistral's template rejects transcripts from other models (tool roles,
+    # mid-conversation system messages, non-9-char tool call IDs). Since we only
+    # need a consistent token sequence for the forward pass — not valid Mistral
+    # prompt formatting — a simple role-prefixed concatenation is sufficient.
+    text = _messages_to_text(messages)
     token_ids: list[int] = tokenizer.encode(text)
 
     if len(token_ids) == 0:
