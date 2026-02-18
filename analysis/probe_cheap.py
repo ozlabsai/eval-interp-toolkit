@@ -8,6 +8,7 @@ Comparisons:
 For each comparison, reports:
   - Per-feature AUC (univariate, cross-validated)
   - Combined model AUC (all features, cross-validated)
+  - Length-controlled versions of both (features residualized against log(n_tokens))
 
 Usage:
   python -m analysis.probe_cheap logs/trace_Mistral-7B-Instruct-v0.3_mini
@@ -16,7 +17,7 @@ Usage:
 import sys
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
@@ -45,6 +46,13 @@ def probe(X: np.ndarray, y: np.ndarray, cv: StratifiedKFold) -> float:
     )
     scores = cross_val_score(pipe, X, y, cv=cv, scoring="roc_auc")
     return float(scores.mean())
+
+
+def residualize(X: np.ndarray, log_n_tokens: np.ndarray) -> np.ndarray:
+    """Remove linear effect of log(n_tokens) from each column of X."""
+    ctrl = log_n_tokens.reshape(-1, 1)
+    lr = LinearRegression().fit(ctrl, X)
+    return X - lr.predict(ctrl)
 
 
 def run(trace_dir: str) -> None:
@@ -87,6 +95,21 @@ def run(trace_dir: str) -> None:
         auc_combined = probe(X, y, cv)
         print(f"{'─' * 25} {'─' * 6}")
         print(f"{'COMBINED':<25} {auc_combined:.3f}")
+
+        # Length-controlled: residualize each feature against log(n_tokens)
+        log_len = np.log1p(subset["n_tokens"].fillna(0).values).astype(float)
+        print(f"\n  [length-controlled: residualized against log(n_tokens)]")
+        print(f"  {'Feature':<23} {'AUC':>6}")
+        print(f"  {'─' * 23} {'─' * 6}")
+        for feat in available_features:
+            x_raw = subset[feat].fillna(0).values.reshape(-1, 1)
+            x_res = residualize(x_raw, log_len)
+            auc_res = probe(x_res, y, cv)
+            print(f"  {feat:<23} {auc_res:.3f}")
+        X_res = residualize(X, log_len)
+        auc_res_combined = probe(X_res, y, cv)
+        print(f"  {'─' * 23} {'─' * 6}")
+        print(f"  {'COMBINED':<23} {auc_res_combined:.3f}")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
@@ -36,6 +36,13 @@ def probe(X: np.ndarray, y: np.ndarray, cv: StratifiedKFold) -> float:
     )
     scores = cross_val_score(pipe, X, y, cv=cv, scoring="roc_auc")
     return float(scores.mean())
+
+
+def residualize(X: np.ndarray, log_n_tokens: np.ndarray) -> np.ndarray:
+    """Remove linear effect of log(n_tokens) from each column of X."""
+    ctrl = log_n_tokens.reshape(-1, 1)
+    lr = LinearRegression().fit(ctrl, X)
+    return X - lr.predict(ctrl)
 
 
 def load_activations(trace_dir: str, sample_ids: list[str]) -> dict[int, dict[str, np.ndarray]]:
@@ -128,6 +135,25 @@ def run(trace_dir: str) -> None:
                 auc_cat = probe(X_cat, y_cat, cv)
                 print(f"{'─' * 20} {'─' * 6}  {'─' * 10}")
                 print(f"  {'CONCATENATED':<18} {auc_cat:.3f}  {len(common_all):>10}")
+
+                # Length-controlled: residualize activations against log(n_tokens)
+                len_map = dict(zip(subset["sample_id"], subset["n_tokens"].fillna(0)))
+                log_len_cat = np.log1p(np.array([len_map[sid] for sid in common_all], dtype=float))
+                print(f"\n  [length-controlled: residualized against log(n_tokens)]")
+                print(f"  {'Layer':<18} {'AUC':>6}  {'n_samples':>10}")
+                print(f"  {'─' * 18} {'─' * 6}  {'─' * 10}")
+                for layer_idx, (X_l, y_l) in sorted(per_layer_arrays.items()):
+                    common_l = [sid for sid in subset["sample_id"] if sid in layer_acts[layer_idx]]
+                    if len(common_l) < 10:
+                        continue
+                    log_len_l = np.log1p(np.array([len_map[sid] for sid in common_l], dtype=float))
+                    X_l_res = residualize(X_l, log_len_l)
+                    auc_l_res = probe(X_l_res, y_l, cv)
+                    print(f"  layer {layer_idx:<12} {auc_l_res:.3f}  {len(common_l):>10}")
+                X_cat_res = residualize(X_cat, log_len_cat)
+                auc_cat_res = probe(X_cat_res, y_cat, cv)
+                print(f"  {'─' * 18} {'─' * 6}  {'─' * 10}")
+                print(f"  {'CONCATENATED':<18} {auc_cat_res:.3f}  {len(common_all):>10}")
 
 
 if __name__ == "__main__":
