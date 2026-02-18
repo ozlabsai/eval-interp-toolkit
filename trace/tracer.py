@@ -101,10 +101,14 @@ def _trace_windows(
 
             def make_hook(idx: int):
                 def hook_fn(module, input, output):
-                    # output is a tuple; first element is the hidden state [batch, seq, hidden]
-                    hidden = output[0]  # [1, seq_len, hidden_dim]
-                    # Mean-pool over sequence positions immediately to save GPU memory
-                    captured[idx] = hidden[0].mean(dim=0).detach().cpu()  # [hidden_dim]
+                    # output may be a tuple (hidden, ...) or a bare tensor depending on
+                    # transformers version and model architecture
+                    hidden = output[0] if isinstance(output, tuple) else output
+                    # hidden shape: [batch, seq_len, hidden_dim] or [seq_len, hidden_dim]
+                    if hidden.dim() == 3:
+                        hidden = hidden[0]  # remove batch dim -> [seq_len, hidden_dim]
+                    # Now hidden is [seq_len, hidden_dim]; mean-pool over sequence
+                    captured[idx] = hidden.mean(dim=0).detach().cpu()  # [hidden_dim]
                 return hook_fn
 
             hooks.append(layer.register_forward_hook(make_hook(layer_idx)))

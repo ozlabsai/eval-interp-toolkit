@@ -121,7 +121,7 @@ def run(trace_dir: str) -> None:
             if len(common_all) >= 10:
                 # [n_samples, n_layers * hidden_dim]
                 X_cat = np.stack([
-                    np.concatenate([layer_acts[l][sid] for l in sorted(per_layer_arrays)])
+                    np.concatenate([layer_acts[l][sid].reshape(-1) for l in sorted(per_layer_arrays)])
                     for sid in common_all
                 ])
                 y_cat = np.array([y_map[sid] for sid in common_all])
