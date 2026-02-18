@@ -133,28 +133,35 @@ def run_trace_local(limit: int, mini_suffix: str, model_id: str) -> None:
     Works with any HF causal LM using the standard decoder architecture
     (model.model.layers[n]), e.g. Mistral, LLaMA, Gemma, Qwen.
     """
+    from tqdm import tqdm
     from trace.dataset import load_trace_dataset
     from trace.windower import messages_to_windows
     from trace.tracer import load_model, unload_model, trace_sample
     from trace.writer import write_outputs
 
     device = "cuda"
-    # Derive a filesystem-safe slug from the model ID (e.g. "mistralai/Mistral-7B-..." -> "Mistral-7B-...")
     model_slug = model_id.split("/")[-1]
     output_dir = f"logs/trace_{model_slug}{mini_suffix}"
     data_limit = limit if limit < 1_000_000 else None
 
     records = load_trace_dataset(MAIN_DATA_FILE, limit=data_limit)
+    print(f"Loaded {len(records)} samples  ({sum(r.label == 'EVAL' for r in records)} EVAL, "
+          f"{sum(r.label == 'HARD_NEG' for r in records)} HARD_NEG, "
+          f"{sum(r.label == 'REAL' for r in records)} REAL)")
+
+    print(f"Loading model {model_id} ...")
     tokenizer, model = load_model(model_id=model_id, device=device)
 
     traces = []
-    for rec in records:
+    for rec in tqdm(records, desc="Tracing", unit="sample"):
         windows = messages_to_windows(rec.messages, tokenizer)
         trace = trace_sample(rec.sample_id, windows, model, device=device)
         traces.append(trace)
 
+    print("Writing outputs ...")
     unload_model(model)
     write_outputs(traces, records, output_dir, model_id=model_id, limit=data_limit, device=device)
+    print(f"Done → {output_dir}")
 
 
 def main():
