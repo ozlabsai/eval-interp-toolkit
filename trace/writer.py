@@ -66,6 +66,7 @@ def _write_parquet(
             "n_tokens": t.n_tokens,
             "mean_entropy": t.mean_entropy,
             "logprob_sum": t.logprob_sum,
+            "logprob_per_token": t.logprob_sum / t.n_tokens if t.n_tokens > 0 else None,
             "mean_margin": t.mean_margin,
             "min_margin": t.min_margin,
         }
