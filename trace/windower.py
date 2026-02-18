@@ -77,11 +77,16 @@ def messages_to_windows(
     # Normalize tool call IDs before templating — transcripts from Claude/GPT use
     # UUIDs; Mistral's template requires exactly 9 alphanumeric chars.
     messages = _sanitize_messages(messages)
-    token_ids: list[int] = tokenizer.apply_chat_template(
+    # Render to string first, then tokenize separately.
+    # apply_chat_template with tokenize=True can return a tokenizers.Encoding object
+    # from the fast tokenizer backend rather than a plain list[int], which breaks
+    # torch.tensor(). Splitting into two steps always yields a plain list.
+    text: str = tokenizer.apply_chat_template(
         messages,
-        tokenize=True,
+        tokenize=False,
         add_generation_prompt=False,
     )
+    token_ids: list[int] = tokenizer.encode(text)
 
     if len(token_ids) == 0:
         return []
