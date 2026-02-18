@@ -5,7 +5,7 @@ import sys
 
 from constants import MAIN_DATA_FILE, find_most_recent_file
 
-STAGES = ["eval_mcq", "purpose_mcq", "purpose_open", "eval_mcq_cot", "purpose_open_cot", "plot_roc", "plot_calib", "plot_purpose", "plot_cot", "print_table", "trace_local", "probe_cheap", "probe_acts"]
+STAGES = ["eval_mcq", "purpose_mcq", "purpose_open", "eval_mcq_cot", "purpose_open_cot", "plot_roc", "plot_calib", "plot_purpose", "plot_cot", "print_table", "trace_local", "probe_cheap", "probe_acts", "probe_direction"]
 
 MODELS = [
     ("openai", "gpt-4.1-mini-2025-04-14", None, None),
@@ -238,6 +238,11 @@ def main():
                 model_slug = args.trace_model.split("/")[-1]
                 subprocess.run([sys.executable, "-m", "analysis.probe_acts",
                                 f"logs/trace_{model_slug}{mini_suffix}"], check=True)
+            case "probe_direction":
+                model_slug = args.trace_model.split("/")[-1]
+                subprocess.run([sys.executable, "-m", "analysis.probe_direction",
+                                f"logs/trace_{model_slug}{mini_suffix}",
+                                "--model", args.trace_model], check=True)
             case _:
                 raise ValueError(f"Unknown stage: {stage}")
 
