@@ -70,6 +70,12 @@ def run(trace_dir: str) -> None:
 
     n_loaded = len(next(iter(layer_acts.values())))
     print(f"Loaded activations: {n_loaded} samples across layers {HOOK_LAYERS}")
+    # Sanity check shape of first loaded activation
+    for layer_idx, acts in layer_acts.items():
+        if acts:
+            first = next(iter(acts.values()))
+            print(f"  layer {layer_idx} activation shape: {first.shape}")
+            break
 
     for comparison_name, (pos_label, neg_label) in COMPARISONS:
         subset = df[df["label"].isin([pos_label, neg_label])].copy()
@@ -96,7 +102,8 @@ def run(trace_dir: str) -> None:
                 print(f"  layer {layer_idx:<14} {'n/a':>6}  {len(common_ids):>10}")
                 continue
 
-            X = np.stack([acts[sid] for sid in common_ids])
+            vecs = [acts[sid].reshape(-1) for sid in common_ids]
+            X = np.stack(vecs)   # [n_samples, hidden_dim]
             y = np.array([y_map[sid] for sid in common_ids])
             per_layer_arrays[layer_idx] = (X, y)
 
